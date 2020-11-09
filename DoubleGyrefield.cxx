@@ -21,7 +21,6 @@ double dfx = (2*a_t*location[0]) + b_t;
 
 velocity[0] = (-1) * A * sin(PI*fx) * cos(PI * location[1]);
 velocity[1] = PI * A * cos(PI * fx) * sin(PI * location[1]) * dfx;
-velocity[2] = 0;
 }
 
 };
