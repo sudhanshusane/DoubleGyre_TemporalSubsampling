@@ -1,3 +1,12 @@
+#include <vtkSmartPointer.h>
+#include <vtkRectilinearGridReader.h>
+#include <vtkRectilinearGrid.h>
+#include <vtkDataArray.h>
+#include <vtkPointData.h>
+#include <vtkAbstractArray.h>
+#include <vtkFloatArray.h>
+#include <vtkDoubleArray.h>
+#include <vtkDataSetWriter.h>
 #include "DoubleGyrefield.cxx"
 #include <stdlib.h>
 #include <iostream>
@@ -20,6 +29,7 @@ int cycle_next = cycle_prev + interval;
 int dims[2];
 dims[0] = atoi(argv[3]);
 dims[1] = atoi(argv[4]);
+int num_seeds = dims[0]*dims[1];
 
 float bounds[4];
 bounds[0] = atof(argv[5]);
@@ -27,14 +37,19 @@ bounds[1] = atof(argv[6]);
 bounds[2] = atof(argv[7]);
 bounds[3] = atof(argv[8]);
 
+float threshold = atof(argv[9]);
+
 vector<float> x_current, y_current;
 vector<float> x_gt, y_gt;
 vector<float> error;
+vector<float> aedr;
+
+for(int i = 0; i < num_seeds; i++)
+	aedr.push_back(0.0);
 
 
 /* Define seed starting locations */
 
-int num_seeds = dims[0]*dims[1];
 
 float x_spacing, y_spacing;
 x_spacing = (bounds[1]-bounds[0])/(dims[0]-1);
@@ -101,6 +116,20 @@ for(int c = 0; c < num_cycles; c++)
 
 		x_current[n] = loc_eul[0] + h*vel_eul[0];
 		y_current[n] = loc_eul[1] + h*vel_eul[1];
+
+		
+		float diff = sqrt(pow(x_gt[n]-x_current[n],2.0) + pow(y_gt[n]-y_current[n],2.0));
+		
+		if(diff < threshold)
+		{
+			float flag = diff/threshold;
+			aedr[n] += flag;
+		}
+		else
+		{
+			aedr[n] += 1;
+		}
+		
 	}
 }
 
@@ -109,6 +138,13 @@ float max = 0.0;
 float sum = 0.0;
 float avg;
 
+vtkSmartPointer<vtkFloatArray> errorArray = vtkSmartPointer<vtkFloatArray>::New();
+errorArray->SetName("endpt");
+errorArray->SetNumberOfComponents(1);
+
+vtkSmartPointer<vtkFloatArray> aedrArray = vtkSmartPointer<vtkFloatArray>::New();
+aedrArray->SetName("aedr");
+aedrArray->SetNumberOfComponents(1);
 
 for(int n = 0; n < num_seeds; n++)
 {
@@ -121,8 +157,11 @@ for(int n = 0; n < num_seeds; n++)
 	pt2[1] = x_current[n];
 	
 	float dist = sqrt(pow(pt1[0] - pt2[0], 2.0) + pow(pt1[1]-pt2[1], 2.0));
-	error.push_back(dist);
+	errorArray->InsertNextTuple1(dist);
 
+	float sim = aedr[n]/num_cycles;	
+	aedrArray->InsertNextTuple1(sim);
+ 
 	if(dist < min)
 		min = dist;
 
@@ -138,6 +177,43 @@ for(int n = 0; n < num_seeds; n++)
 	cout << "Average error: " << avg << endl;
 	cout << "Min error: " << min << endl;
 	cout << "Max error: " << max << endl;
+
+  /* Write binary_image data as a scalar field to a vtk data set and output it. */
+  vtkSmartPointer<vtkDoubleArray> xCoords =
+    vtkSmartPointer<vtkDoubleArray>::New();
+  vtkSmartPointer<vtkDoubleArray> yCoords =
+    vtkSmartPointer<vtkDoubleArray>::New();
+  vtkSmartPointer<vtkDoubleArray> zCoords =
+    vtkSmartPointer<vtkDoubleArray>::New();
+
+  for(int i = 0; i < dims[0]; i++)
+  xCoords->InsertNextValue(bounds[0] + x_spacing*i);
+
+  for(int i = 0; i < dims[1]; i++)
+  yCoords->InsertNextValue(bounds[2] + y_spacing*i);
+
+	zCoords->InsertNextValue(0.0);
+
+  vtkSmartPointer<vtkDataSetWriter> writer =
+    vtkSmartPointer<vtkDataSetWriter>::New();
+
+  vtkSmartPointer<vtkRectilinearGrid> outputGrid =
+      vtkSmartPointer<vtkRectilinearGrid>::New();
+
+  outputGrid->SetDimensions(dims[0], dims[1], 1);
+  outputGrid->SetXCoordinates(xCoords);
+  outputGrid->SetYCoordinates(yCoords);
+
+  outputGrid->GetPointData()->AddArray(errorArray);
+  outputGrid->GetPointData()->AddArray(aedrArray);
+
+	stringstream s;
+	s << "ErrorPlot_" << interval << "_" << num_cycles << ".vtk";
+
+  writer->SetFileName(s.str().c_str());
+  writer->SetInputData(outputGrid);
+  writer->SetFileTypeToASCII();
+  writer->Write();
 
 }
 
